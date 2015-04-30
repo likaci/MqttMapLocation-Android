@@ -1,5 +1,6 @@
 package com.xiazhiri.mqttmapposition.app;
 
+import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationListener;
 import android.os.Bundle;
@@ -12,8 +13,15 @@ import butterknife.InjectView;
 import com.esri.android.map.GraphicsLayer;
 import com.esri.android.map.MapView;
 import com.esri.android.map.ags.ArcGISTiledMapServiceLayer;
+import com.esri.core.geometry.GeometryEngine;
+import com.esri.core.geometry.Point;
+import com.esri.core.geometry.SpatialReference;
+import com.esri.core.map.Graphic;
+import com.esri.core.symbol.SimpleMarkerSymbol;
+import com.esri.core.symbol.TextSymbol;
 import org.eclipse.paho.android.service.MqttAndroidClient;
 import org.eclipse.paho.client.mqttv3.*;
+import org.json.JSONObject;
 
 import java.util.Random;
 
@@ -25,7 +33,7 @@ public class ActivityMain extends ActionBarActivity implements MqttCallback, IMq
     private MqttAndroidClient client;
     private boolean isConnected;
     private GraphicsLayer layer;
-    String id = String.valueOf(new Random().nextInt(100));
+    String id = "Android" + String.valueOf(new Random().nextInt(100));
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,7 +41,7 @@ public class ActivityMain extends ActionBarActivity implements MqttCallback, IMq
         setContentView(R.layout.activity_main);
         ButterKnife.inject(this);
 
-        mapView.addLayer(new ArcGISTiledMapServiceLayer("http://cache1.arcgisonline.cn/ArcGIS/rest/services/ChinaOnlineCommunity/MapServer/0"));
+        mapView.addLayer(new ArcGISTiledMapServiceLayer("http://cache1.arcgisonline.cn/ArcGIS/rest/services/ChinaOnlineCommunity/MapServer"));
 
         layer = new GraphicsLayer();
         mapView.addLayer(layer);
@@ -63,7 +71,7 @@ public class ActivityMain extends ActionBarActivity implements MqttCallback, IMq
     //region LocationListener
     @Override
     public void onLocationChanged(Location location) {
-        String msg = String.format("{\"id\":\"Android-%s\",\"x\":%.9f,\"y\":%.9f}", id, location.getLongitude(), location.getLatitude());
+        String msg = String.format("{\"id\":\"%s\",\"x\":%.9f,\"y\":%.9f}", id, location.getLongitude(), location.getLatitude());
         try {
             client.publish("Likaci/MqttMap", msg.getBytes(), 0, false);
         } catch (Exception e) {
@@ -92,6 +100,11 @@ public class ActivityMain extends ActionBarActivity implements MqttCallback, IMq
     public void onSuccess(IMqttToken iMqttToken) {
         isConnected = true;
         ShowToast("连接成功");
+        try {
+            client.subscribe("Likaci/MqttMap", 0);
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
@@ -108,8 +121,24 @@ public class ActivityMain extends ActionBarActivity implements MqttCallback, IMq
     }
 
     @Override
-    public void messageArrived(String s, MqttMessage mqttMessage) throws Exception {
+    public void messageArrived(String topic, MqttMessage mqttMessage) throws Exception {
+        if (topic.equals("Likaci/MqttMap")) {
+            String msg = new String(mqttMessage.getPayload());
+            JSONObject json = new JSONObject(msg);
+            if (!json.getString("id").equals(id)) {
+                Point p = (Point) GeometryEngine.project(new Point(json.getDouble("x"), json.getDouble("y")), SpatialReference.create(4326), SpatialReference.create(3857));
 
+                layer.removeAll();
+
+                SimpleMarkerSymbol markerSymbol = new SimpleMarkerSymbol(Color.parseColor("#763382"), 15, SimpleMarkerSymbol.STYLE.DIAMOND);
+                layer.addGraphic(new Graphic(p, markerSymbol));
+
+                TextSymbol textSymbol = new TextSymbol(15, json.getString("id"), Color.parseColor("#763382"), TextSymbol.HorizontalAlignment.CENTER, TextSymbol.VerticalAlignment.MIDDLE);
+                textSymbol.setOffsetY(-15);
+                layer.addGraphic(new Graphic(p, textSymbol));
+
+            }
+        }
     }
 
     @Override
